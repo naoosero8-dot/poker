@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>オセロニアポーカー — GitHub リモート同期版</title>
+<title>オセロニアポーカー — リアルタイム完全版 (Firestore)</title>
 <style>
   :root{--bg:#f6f6f8;--card:#fff;--accent:#2b6df6}
   body{font-family:system-ui,-apple-system,"Hiragino Kaku Gothic ProN","メイリオ",sans-serif;margin:0;background:var(--bg);color:#111}
@@ -22,67 +22,60 @@
   .controls{display:flex;gap:8px;flex-wrap:wrap}
   .timer{font-weight:700;color:#c33}
   .status{padding:8px;background:#f2f8ff;border-radius:6px;border:1px solid #dfefff}
+  textarea{width:100%;min-height:64px}
   .selected{outline:3px solid rgba(43,109,246,.18)}
   .hit{background:#eaf5ff}
   footer{font-size:12px;color:#666;margin-top:12px}
   .btn-primary{background:var(--accent);color:#fff;border:none}
-  label.block{display:block;margin-bottom:6px}
-  .config{display:flex;gap:8px;align-items:center}
   .notice{padding:8px;background:#fff7e6;border-radius:6px;border:1px solid #ffe6a8;color:#664400}
-  pre.small{font-size:11px;color:#666;white-space:pre-wrap}
+  .muted{color:#888;font-size:12px}
 </style>
 </head>
 <body>
-<header><h1 style="display:inline">オセロニアポーカー — GitHub 同期版</h1></header>
+<header><h1 style="display:inline">オセロニアポーカー — リアルタイム版（Firestore）</h1></header>
 <div class="wrap">
 
-  <section id="configPanel" style="margin-bottom:12px">
-    <h3>GitHub 設定（必須）</h3>
-    <div class="small">このページは GitHub のリポジトリ内の JSON ファイル(cards.json, rooms.json) を読み書きして、複数端末でリアルタイム（ポーリング）同期を行います。書き込みには Personal Access Token (repo 権限) が必要です。トークンはセッションにのみ保存され、サーバへ送信されません。</div>
-    <div style="margin-top:8px" class="config">
-      <label class="block">Owner: <input id="ghOwner" placeholder="owner (例: naoosero8-dot)"></label>
-      <label class="block">Repo: <input id="ghRepo" placeholder="repo (例: my-repo)"></label>
-      <label class="block">Branch: <input id="ghBranch" value="main" style="width:80px"></label>
-      <label class="block">cards.json path: <input id="cardsPath" value="cards.json" style="width:160px"></label>
-      <label class="block">rooms.json path: <input id="roomsPath" value="rooms.json" style="width:160px"></label>
+  <!-- Firebase config / quick start -->
+  <div id="setupPanel" class="status">
+    <strong>セットアップ（最初に必要）</strong>
+    <div class="small">
+      1) Firebase コンソールでプロジェクトを作成。Firestore を有効化し、Authentication → Sign-in method で「匿名」を有効にしてください。<br>
+      2) プロジェクト設定 → アプリを追加（Web）で firebaseConfig を取得し、下のフォームに貼り付けて「接続して開始」ボタンを押してください。<br>
+      （セキュリティルールは開発用に緩くしてください：request.auth != null を使う想定です）
     </div>
-    <div style="margin-top:8px" class="config">
-      <input id="ghToken" placeholder="GitHub Personal Access Token (repo scope)" style="width:420px">
-      <button id="btnConnect" class="btn-primary">接続して読み込む</button>
-      <button id="btnClearToken">トークン削除</button>
+    <div style="margin-top:8px">
+      <textarea id="firebaseConfig" placeholder="Paste firebaseConfig JSON here (e.g. { apiKey: '...', projectId: '...'} )" style="width:100%;min-height:68px"></textarea>
+      <div style="margin-top:8px" class="controls"><button id="btnInit" class="btn-primary">接続して開始</button> <button id="btnClear">設定をクリア</button></div>
+      <div id="setupMsg" class="small"></div>
     </div>
-    <div id="connectMsg" class="small" style="margin-top:8px"></div>
-    <div class="notice" style="margin-top:8px">
-      注意: トークンはブラウザの sessionStorage にのみ保存します。公開リポジトリなら読み取りは可能ですが、書き込みにはトークンが必要です。複数端末で共同編集する場合は各端末でトークンを入力してください。
-    </div>
-  </section>
+  </div>
 
-  <!-- Start / Join -->
-  <div id="startView">
+  <!-- Start / create room -->
+  <div id="startView" class="hidden" style="margin-top:12px">
     <div class="row">
       <div class="col" style="flex:1">
-        <label class="block">合言葉（4桁・新規作成）<input id="newCode" maxlength="4" placeholder="例: 1234"></label>
-        <label class="block">人数上限<select id="maxPlayers"><option>4</option><option>5</option><option>6</option></select></label>
-        <label class="block">あなたのニックネーム<input id="creatorName" value="Player"></label>
+        <label>合言葉（4桁・新規作成）<input id="newCode" maxlength="4" placeholder="例: 1234"></label>
+        <label>人数上限<select id="maxPlayers"><option>4</option><option>5</option><option>6</option></select></label>
+        <label>あなたのニックネーム<input id="creatorName" value="Player"></label>
         <div class="controls"><button id="btnCreate" class="btn-primary">部屋を作る</button>
         <button id="btnJoinExisting">合言葉で入室</button>
         <button id="btnAdminLogin">管理者ログイン</button></div>
         <div id="startMsg" class="small"></div>
       </div>
-      <div style="width:320px">
-        <div class="status"><strong>使い方</strong>
-          <div class="small">まず GitHub 設定を入力して「接続して読み込む」を押してください。読み込み後に部屋を作成 / 入室できます。管理者はカード編集が可能です。</div>
+      <div style="width:340px">
+        <div class="status"><strong>動作説明</strong>
+          <div class="small">Firestore をバックエンドにして複数端末でリアルタイム同期します。管理者はカード編集が可能です。</div>
         </div>
       </div>
     </div>
   </div>
 
   <!-- Join -->
-  <div id="joinView" class="hidden">
+  <div id="joinView" class="hidden" style="margin-top:12px">
     <div class="row">
       <div class="col" style="flex:1">
-        <label class="block">合言葉（4桁）<input id="joinCode" maxlength="4"></label>
-        <label class="block">ニックネーム<input id="joinName" value="Player"></label>
+        <label>合言葉（4桁）<input id="joinCode" maxlength="4"></label>
+        <label>ニックネーム<input id="joinName" value="Player"></label>
         <div class="controls">
           <button id="btnJoin" class="btn-primary">入室</button>
           <button id="btnBackStart">戻る</button>
@@ -93,35 +86,85 @@
   </div>
 
   <!-- Lobby / Game -->
-  <div id="lobbyView" class="hidden">
+  <div id="lobbyView" class="hidden" style="margin-top:12px">
     <div class="row">
       <div style="flex:1">
-        <div><strong>ルーム</strong> <span id="roomCodeDisplay"></span></div>
-        <div class="small">部屋主: <span id="roomOwner"></span></div>
+        <div class="row" style="align-items:center;gap:8px">
+          <div><strong>ルーム</strong> <span id="roomCodeDisplay"></span></div>
+          <div class="small">部屋主: <span id="roomOwner"></span></div>
+          <div style="margin-left:auto"><button id="btnBackToStart">スタートへ</button></div>
+        </div>
+
         <div style="margin-top:8px">
           <label>Act as:
             <select id="actAsSelect"></select>
           </label>
           <label style="margin-left:8px">自分の表示名<input id="myDisplay" style="width:160px"></label>
         </div>
-        <div style="margin-top:8px">
+
+        <div style="margin-top:8px" class="controls">
           <button id="btnReady">準備OK</button>
           <button id="btnStartGame" class="hidden btn-primary">ゲーム開始（部屋主のみ）</button>
           <button id="btnLeave">退出</button>
           <button id="btnDissolve" class="hidden">部屋解散（部屋主）</button>
         </div>
-        <div style="margin-top:8px"><strong>プレイヤー一覧</strong></div>
+
+        <div style="margin-top:12px"><strong>プレイヤー一覧</strong></div>
         <div id="playersList" class="card-grid" style="margin-top:8px"></div>
+
+        <!-- Game panels -->
+        <div id="gameArea" style="margin-top:12px" class="hidden">
+          <div><strong>状態:</strong> <span id="phaseLabel" class="small hit">—</span></div>
+          <div style="margin-top:8px">
+            <h3>あなたの手札（Act as に合わせて表示）</h3>
+            <div id="handArea" class="card-grid"></div>
+          </div>
+
+          <div id="exchangePanel" class="hidden" style="margin-top:12px">
+            <h4>交換フェーズ</h4>
+            <div>ラウンド: <span id="exchangeRoundDisplay"></span> / <span id="exchangeIndexDisplay"></span></div>
+            <div class="controls"><button id="btnExchangeDo">選択したカードを交換</button> <button id="btnExchangeOK">交換なし</button></div>
+          </div>
+
+          <div id="submitPanel" class="hidden" style="margin-top:12px">
+            <h4>提出フェーズ</h4>
+            <div id="submitHand" class="card-grid" style="margin-top:8px"></div>
+            <div style="margin-top:8px">役名: <input id="roleInput" style="width:40%"><button id="btnSubmit" class="btn-primary">提出</button></div>
+          </div>
+
+          <div id="votePanel" class="hidden" style="margin-top:12px">
+            <h4>投票フェーズ</h4>
+            <div id="submissionsArea"></div>
+          </div>
+
+          <div id="resultPanel" class="hidden" style="margin-top:12px">
+            <h4>結果</h4>
+            <div id="resultDisplay"></div>
+            <div style="margin-top:8px"><button id="btnNextGame">次のゲーム（リセット）</button></div>
+          </div>
+
+          <div style="margin-top:12px" id="ownerControls" class="hidden">
+            <div class="small">部屋主コントロール（手動で進行）</div>
+            <div class="controls" style="margin-top:8px">
+              <button id="btnOwnerAdvanceExchange" class="btn-primary">次の交換ターンへ</button>
+              <button id="btnOwnerStartSubmit" class="btn-primary">提出フェーズへ</button>
+              <button id="btnOwnerStartVote" class="btn-primary">投票フェーズへ</button>
+              <button id="btnOwnerFinishVote" class="btn-primary">投票終了・結果表示</button>
+            </div>
+          </div>
+        </div>
+
       </div>
+
       <div style="width:340px">
         <div class="status">
-          <div><strong>ルーム操作</strong></div>
-          <div class="small">部屋データは GitHub 上の rooms.json に保存されます。複数端末で同時編集できます（ポーリングで同期）。</div>
+          <div><strong>カード / 山札</strong></div>
+          <div class="small">カードデータは Firestore の meta/cards に保存されます。管理者ログインで編集可能。</div>
         </div>
         <div style="margin-top:12px">
-          <strong>管理者</strong>
-          <div class="small">管理者ログインでカード編集が可能（cards.json を書き込みます）。</div>
-          <button id="btnOpenAdmin">管理画面を開く</button>
+          <strong>管理</strong>
+          <div class="small">管理者はカード編集ができます（匿名認証を使っています）。</div>
+          <div style="margin-top:8px"><button id="btnOpenAdmin">管理画面を開く</button></div>
         </div>
       </div>
     </div>
@@ -130,287 +173,489 @@
   <!-- Admin panel -->
   <div id="adminPanel" class="hidden" style="margin-top:12px">
     <h3>管理画面 — カード編集</h3>
-    <div class="small">カードデータは GitHub の cards.json に保存されます。画像は DataURL として埋め込み可（サイズに注意）。</div>
+    <div class="small">カードは Firestore の meta/cards で一括管理。画像は DataURL として保存されます（サイズ注意）。</div>
     <div style="margin-top:8px">
       <label>カード検索（ID or 名前）<input id="adminSearch" placeholder="例: 001"></label>
     </div>
     <div id="adminCards" class="card-grid" style="margin-top:8px;height:420px;overflow:auto"></div>
     <div style="margin-top:8px">
-      <button id="btnExport">カードデータをダウンロード（JSON）</button>
+      <button id="btnExport">カードデータをエクスポート（JSON）</button>
       <button id="btnImport">カードデータをインポート（JSON）</button>
       <input type="file" id="importFile" accept="application/json" class="hidden">
     </div>
   </div>
 
-  <footer style="margin-top:12px" class="small">※このクライアントは GitHub をデータストアとして使っています。書き込みには各自の Personal Access Token（repo スコープ）が必要です。トークンは sessionStorage にのみ保存されます。</footer>
+  <div style="margin-top:12px">
+    <strong>操作ログ</strong>
+    <div id="logArea" style="height:180px;overflow:auto;border:1px solid #eee;padding:8px;background:#fafafa"></div>
+  </div>
+
+  <footer style="margin-top:12px" class="small">※このページは Firestore を利用します。firebaseConfig を設定し、Firestore と匿名認証を有効にしてください。</footer>
 </div>
 
+<!-- Firebase compat SDKs for simpler migration with this single-file -->
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+
 <script>
-/* -----------------------------------------
-   GitHub-backed single-file app
-   - Stores cards.json and rooms.json in specified repository.
-   - Uses GitHub REST API to PUT/GET files (requires token for writes).
-   - Polls repository for changes every POLL_MS to achieve near-real-time sync across devices.
-   ----------------------------------------- */
+/*
+  Complete single-file app using Firestore realtime listeners.
+  - Replace firebaseConfig JSON in the textarea and press "接続して開始".
+  - Enable Firestore and Anonymous Auth in your Firebase project.
+  - Security rules should require request.auth != null for writes (recommended).
+  - This implementation uses owner-driven phase progression to keep transitions robust.
+*/
 
-const POLL_MS = 4000;
-
-// --- utility
+/* ---------- Utilities ---------- */
 function el(id){ return document.getElementById(id); }
 function uid(prefix='p'){ return prefix + Math.random().toString(36).slice(2,9); }
-function b64(s){ return btoa(unescape(encodeURIComponent(s))); }
-function ub64(s){ return decodeURIComponent(escape(atob(s))); }
 function escapeHtml(s){ return (s+'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-function log(msg){ const a=el('logArea'); if(a) a.innerHTML = `<div class="small">[${(new Date()).toLocaleTimeString()}] ${escapeHtml(msg)}</div>` + a.innerHTML; }
+function log(msg){ el('logArea').innerHTML = `<div class="small">[${(new Date()).toLocaleTimeString()}] ${escapeHtml(msg)}</div>` + el('logArea').innerHTML; }
 
-// --- GitHub configuration (from UI)
-function ghConfig(){
-  return {
-    owner: el('ghOwner').value.trim(),
-    repo: el('ghRepo').value.trim(),
-    branch: el('ghBranch').value.trim() || 'main',
-    cardsPath: el('cardsPath').value.trim() || 'cards.json',
-    roomsPath: el('roomsPath').value.trim() || 'rooms.json',
-    token: sessionStorage.getItem('GH_TOKEN') || (el('ghToken') && el('ghToken').value.trim()) || ''
-  };
-}
+/* ---------- Firebase state ---------- */
+let firebaseApp = null;
+let auth = null;
+let db = null;
+let currentUser = null;
 
-function setTokenInSession(token){
-  if(!token) sessionStorage.removeItem('GH_TOKEN');
-  else sessionStorage.setItem('GH_TOKEN', token);
-  el('ghToken').value = token || '';
-}
+/* Cached realtime listeners */
+let cardsUnsub = null;
+let roomUnsub = null;
 
-// --- GitHub API helpers
-function apiHeaders(token){
-  const h = {'Accept':'application/vnd.github.v3+json'};
-  if(token) h['Authorization'] = 'token ' + token;
-  return h;
-}
+/* Local cache */
+let cards = []; // array of {id,name,img}
+let currentRoom = null; // room code string
+let localRoomsCache = {}; // not always used; main state stored in Firestore
+let actingPlayerId = null;
 
-// Get file metadata (sha) and base64 content via REST API
-async function ghGetFile(owner, repo, path, branch, token){
-  const url = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}?ref=${encodeURIComponent(branch)}`;
-  const res = await fetch(url, {headers: apiHeaders(token)});
-  if(res.status === 404) return null;
-  if(!res.ok) throw new Error(`GitHub GET failed: ${res.status} ${await res.text()}`);
-  return await res.json(); // content (base64), sha, etc.
-}
-
-// Put (create/update) file
-async function ghPutFile(owner, repo, path, branch, token, contentString, message, sha){
-  if(!token) throw new Error('書き込みには GitHub トークンが必要です');
-  const url = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`;
-  const body = {
-    message,
-    content: b64(contentString),
-    branch
-  };
-  if(sha) body.sha = sha;
-  const res = await fetch(url, {method:'PUT', headers: apiHeaders(token), body: JSON.stringify(body)});
-  if(!res.ok) throw new Error(`GitHub PUT failed: ${res.status} ${await res.text()}`);
-  return await res.json();
-}
-
-// Raw file fetch (public read) using raw.githubusercontent (fast)
-async function rawGet(owner, repo, branch, path){
-  const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`;
-  const res = await fetch(url);
-  if(res.status === 404) return null;
-  if(!res.ok) throw new Error(`Raw GET failed: ${res.status}`);
-  return await res.text();
-}
-
-/* -------------------------
-   Application state
-   ------------------------- */
-let cards = []; // array {id,name,img}
-let rooms = {}; // map code -> room object
-let cardsFileSha = null;
-let roomsFileSha = null;
-let pollTimer = null;
-
-/* -------------------------
-   Load / Save from GitHub
-   ------------------------- */
-async function loadCardsFromRepo(){
-  const cfg = ghConfig();
-  // try raw first (public)
+/* ---------- Init / Connect ---------- */
+el('btnInit').onclick = async () => {
+  const txt = el('firebaseConfig').value.trim();
+  if(!txt){ el('setupMsg').innerText = 'firebaseConfig を貼り付けてください'; return; }
+  let cfg = null;
+  try { cfg = JSON.parse(txt); } catch(e){ el('setupMsg').innerText = 'firebaseConfig は JSON 形式です'; return; }
   try {
-    const raw = await rawGet(cfg.owner, cfg.repo, cfg.branch, cfg.cardsPath);
-    if(raw !== null){
-      cards = JSON.parse(raw);
-      // also fetch sha if token available
-      if(cfg.token){
-        const meta = await ghGetFile(cfg.owner, cfg.repo, cfg.cardsPath, cfg.branch, cfg.token);
-        cardsFileSha = meta ? meta.sha : null;
-      } else cardsFileSha = null;
-      return cards;
-    }
+    if(firebase.apps && firebase.apps.length){ firebase.app().delete().catch(()=>{}); } // cleanup
+  } catch(e){}
+  try {
+    firebaseApp = firebase.initializeApp(cfg);
+    auth = firebase.auth();
+    db = firebase.firestore();
+    el('setupMsg').innerText = 'Firebase 初期化中...';
+    // anonymous sign-in
+    auth.onAuthStateChanged(u => {
+      if(u){ currentUser = u; el('setupMsg').innerText = '認証済み: UID=' + u.uid; afterAuthInit(); }
+      else { auth.signInAnonymously().catch(err => el('setupMsg').innerText = '匿名サインイン失敗: '+err.message); }
+    });
   } catch(e){
-    console.warn('rawGet cards failed', e);
+    el('setupMsg').innerText = 'Firebase 初期化エラー: ' + e.message;
   }
-  // fallback to API
-  try {
-    const meta = await ghGetFile(cfg.owner, cfg.repo, cfg.cardsPath, cfg.branch, cfg.token);
-    if(meta){
-      const txt = ub64(meta.content);
-      cards = JSON.parse(txt);
-      cardsFileSha = meta.sha;
-      return cards;
+};
+
+function afterAuthInit(){
+  // Load cards & listen realtime
+  attachCardsListener();
+  showView('startView');
+  el('startView').classList.remove('hidden');
+  log('アプリ準備完了（Firebase 接続済み）');
+}
+
+/* ---------- Firestore helpers ---------- */
+function cardsDocRef(){ return db.doc('meta/cards'); }
+function roomDocRef(code){ return db.collection('rooms').doc(code); }
+
+/* Attach realtime listener to cards doc */
+function attachCardsListener(){
+  if(cardsUnsub) cardsUnsub();
+  cardsUnsub = cardsDocRef().onSnapshot(doc => {
+    if(!doc.exists){
+      // initialize default cards
+      const arr=[];
+      for(let i=1;i<=90;i++){ const id = String(i).padStart(3,'0'); arr.push({id,name:`Card ${id}`,img:null}); }
+      cardsDocRef().set({list: arr}).then(()=> log('cards doc 初期化')).catch(e=>log('cards init failed: '+e.message));
+      return;
     }
-  } catch(e){
-    console.warn('ghGetFile cards failed', e);
-  }
-  // if not exist -> init default
-  cards = [];
-  for(let i=1;i<=90;i++){ const id=String(i).padStart(3,'0'); cards.push({id, name:`Card ${id}`, img:null}); }
-  cardsFileSha = null;
-  return cards;
+    const d = doc.data();
+    cards = d.list || [];
+    renderAdminCards();
+    renderSubmitHand();
+    renderHandArea();
+    renderSubmissions();
+    log('カードデータが更新されました');
+  }, err => { log('cards listener error: ' + err.message); });
 }
 
-async function saveCardsToRepo(message){
-  const cfg = ghConfig();
-  if(!cfg.token) throw new Error('保存するにはトークンが必要です');
-  const content = JSON.stringify(cards, null, 2);
-  const resp = await ghPutFile(cfg.owner, cfg.repo, cfg.cardsPath, cfg.branch, cfg.token, content, message || 'Update cards.json', cardsFileSha);
-  cardsFileSha = resp.content.sha;
-  return resp;
-}
-
-async function loadRoomsFromRepo(){
-  const cfg = ghConfig();
-  try {
-    const raw = await rawGet(cfg.owner, cfg.repo, cfg.branch, cfg.roomsPath);
-    if(raw !== null){
-      rooms = JSON.parse(raw);
-      if(cfg.token){
-        const meta = await ghGetFile(cfg.owner, cfg.repo, cfg.roomsPath, cfg.branch, cfg.token);
-        roomsFileSha = meta ? meta.sha : null;
-      } else roomsFileSha = null;
-      return rooms;
+/* Listen to a specific room in realtime (when joined) */
+function attachRoomListener(code){
+  if(roomUnsub) roomUnsub();
+  roomUnsub = roomDocRef(code).onSnapshot(doc => {
+    if(!doc.exists){
+      log('ルームが削除されました: ' + code);
+      // if we were in that room, leave
+      if(currentRoom === code){ currentRoom = null; showView('startView'); }
+      return;
     }
-  } catch(e){ console.warn('rawGet rooms failed', e); }
-  try {
-    const meta = await ghGetFile(cfg.owner, cfg.repo, cfg.roomsPath, cfg.branch, cfg.token);
-    if(meta){
-      rooms = JSON.parse(ub64(meta.content));
-      roomsFileSha = meta.sha;
-      return rooms;
+    const room = doc.data();
+    localRoomsCache[code] = room;
+    // if this is our current room, update UI
+    if(currentRoom === code){
+      refreshLobby(); refreshGameUI();
     }
-  } catch(e){ console.warn('ghGetFile rooms failed', e); }
-  // not exist -> init empty
-  rooms = {};
-  roomsFileSha = null;
-  return rooms;
+    log('ルーム更新: ' + code);
+  }, err => { log('room listener error: ' + err.message); });
 }
 
-async function saveRoomsToRepo(message){
-  const cfg = ghConfig();
-  if(!cfg.token) throw new Error('保存するにはトークンが必要です');
-  const content = JSON.stringify(rooms, null, 2);
-  const resp = await ghPutFile(cfg.owner, cfg.repo, cfg.roomsPath, cfg.branch, cfg.token, content, message || 'Update rooms.json', roomsFileSha);
-  roomsFileSha = resp.content.sha;
-  return resp;
+/* ---------- Room management (Firestore-backed) ---------- */
+
+async function createRoom(){
+  const code = (el('newCode').value||'').trim();
+  const max = parseInt(el('maxPlayers').value||4);
+  const creator = (el('creatorName').value||'Owner').trim();
+  if(!/^\d{4}$/.test(code)){ alert('合言葉は4桁の数字で入力してください'); return; }
+  // check exists
+  const ref = roomDocRef(code);
+  const doc = await ref.get();
+  if(doc.exists){ alert('その合言葉は既に使われています'); return; }
+  // create room
+  const room = {
+    code,
+    owner: null,
+    maxPlayers: Math.min(6, Math.max(4,max)),
+    players: [],
+    state: 'waiting',
+    deck: [],
+    discard: [],
+    turnOrder: [],
+    exchangeRound: 1,
+    exchangeIndex: 0,
+    submitted: {},
+    votes: {},
+    voteCounts: {},
+    phase: 'waiting',
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+  await ref.set(room);
+  // join as creator
+  await joinRoomWithName(code, creator, true);
+  log('部屋を作成しました: ' + code);
 }
 
-/* -------------------------
-   Polling for updates across devices
-   ------------------------- */
-async function pollOnce(){
+/* Join by code: uses transaction to avoid races */
+async function joinRoom(){
+  const code = (el('joinCode').value||'').trim();
+  const name = (el('joinName').value||('P'+Math.floor(Math.random()*1000))).trim();
+  if(!/^\d{4}$/.test(code)){ el('joinMsg').innerText = '合言葉は4桁'; return; }
   try{
-    const cfg = ghConfig();
-    // load remote versions (cards & rooms) and compare textual content
-    // We use raw fetch to minimize rate-limit for public repos
-    if(cfg.owner && cfg.repo){
-      // cards
-      let remoteCardsText = null;
-      try { remoteCardsText = await rawGet(cfg.owner, cfg.repo, cfg.branch, cfg.cardsPath); } catch(e){}
-      if(remoteCardsText !== null){
-        const parsed = JSON.parse(remoteCardsText);
-        // simple deep-compare by JSON string
-        const localText = JSON.stringify(cards);
-        if(JSON.stringify(parsed) !== localText){
-          cards = parsed;
-          el('connectMsg').innerText = 'cards.json が更新されました（リモート）';
-          renderAdminCards(); renderSubmitHand(); renderHandArea(); renderSubmissions();
-        }
-      } else {
-        // maybe file removed or private; try API if token
-        if(cfg.token){
-          const meta = await ghGetFile(cfg.owner, cfg.repo, cfg.cardsPath, cfg.branch, cfg.token);
-          if(meta){
-            const txt = ub64(meta.content);
-            if(txt !== JSON.stringify(cards)){
-              cards = JSON.parse(txt);
-              renderAdminCards(); renderSubmitHand(); renderHandArea(); renderSubmissions();
-            }
-          }
-        }
-      }
+    await joinRoomWithName(code, name, false);
+    el('joinMsg').innerText = '';
+  } catch(e){
+    el('joinMsg').innerText = e.message || e;
+  }
+}
 
-      // rooms
-      let remoteRoomsText = null;
-      try { remoteRoomsText = await rawGet(cfg.owner, cfg.repo, cfg.branch, cfg.roomsPath); } catch(e){}
-      if(remoteRoomsText !== null){
-        const parsedRooms = JSON.parse(remoteRoomsText);
-        if(JSON.stringify(parsedRooms) !== JSON.stringify(rooms)){
-          rooms = parsedRooms;
-          // if current room updated -> refresh
-          if(document.getElementById('lobbyView') && !document.getElementById('lobbyView').classList.contains('hidden')) refreshLobby();
-          if(document.getElementById('gameView') && !document.getElementById('gameView').classList.contains('hidden')) refreshGameUI();
-          el('connectMsg').innerText = 'rooms.json が更新されました（リモート）';
-        }
-      } else {
-        if(cfg.token){
-          const meta = await ghGetFile(cfg.owner, cfg.repo, cfg.roomsPath, cfg.branch, cfg.token);
-          if(meta){
-            const txt = ub64(meta.content);
-            if(txt !== JSON.stringify(rooms)){
-              rooms = JSON.parse(txt);
-              if(document.getElementById('lobbyView') && !document.getElementById('lobbyView').classList.contains('hidden')) refreshLobby();
-              if(document.getElementById('gameView') && !document.getElementById('gameView').classList.contains('hidden')) refreshGameUI();
-            }
-          }
-        }
+async function joinRoomWithName(code, name, isCreator){
+  const ref = roomDocRef(code);
+  const res = await db.runTransaction(async tx => {
+    const doc = await tx.get(ref);
+    if(!doc.exists) throw new Error('その合言葉の部屋はありません');
+    const room = doc.data();
+    if(room.players.length >= room.maxPlayers) throw new Error('満員です');
+    const pid = uid('p');
+    const player = {id: pid, nick: name, ready:false, hand:[], score:0, connected:true};
+    const newPlayers = room.players.slice();
+    newPlayers.push(player);
+    const update = {players: newPlayers};
+    if(isCreator) update.owner = pid;
+    tx.update(ref, update);
+    return {room: {...room, players: newPlayers, owner: update.owner || room.owner}, player};
+  });
+  // local state
+  localRoomsCache[code] = res.room;
+  currentRoom = code;
+  actingPlayerId = res.player.id;
+  el('myDisplay').value = res.player.nick;
+  attachRoomListener(code);
+  refreshLobby();
+  showView('lobbyView');
+  log(`${res.player.nick} が部屋 ${code} に参加しました`);
+}
+
+/* Leave room */
+async function leaveRoom(){
+  if(!currentRoom || !actingPlayerId) return;
+  const code = currentRoom;
+  const ref = roomDocRef(code);
+  await db.runTransaction(async tx=>{
+    const doc = await tx.get(ref);
+    if(!doc.exists) return;
+    const room = doc.data();
+    const players = room.players.filter(p=>p.id !== actingPlayerId);
+    let owner = room.owner;
+    if(room.owner === actingPlayerId) owner = players.length>0 ? players[0].id : null;
+    if(players.length === 0) tx.delete(ref);
+    else tx.update(ref, {players, owner});
+  });
+  currentRoom = null; actingPlayerId = null;
+  showView('startView');
+  log('退出しました');
+}
+
+/* Dissolve */
+async function dissolveRoom(){
+  if(!currentRoom || !actingPlayerId) return;
+  const code = currentRoom;
+  const ref = roomDocRef(code);
+  const doc = await ref.get();
+  if(!doc.exists) return;
+  const room = doc.data();
+  if(room.owner !== actingPlayerId){ alert('権限がありません'); return; }
+  if(!confirm('本当に部屋を解散しますか？')) return;
+  await ref.delete();
+  currentRoom = null; actingPlayerId = null;
+  showView('startView');
+  log('部屋を解散しました');
+}
+
+/* Toggle ready */
+async function toggleReady(){
+  if(!currentRoom || !actingPlayerId) return;
+  const ref = roomDocRef(currentRoom);
+  await db.runTransaction(async tx=>{
+    const doc = await tx.get(ref); if(!doc.exists) throw new Error('room gone');
+    const room = doc.data();
+    const players = room.players.map(p => p.id===actingPlayerId ? {...p, ready: !p.ready} : p);
+    tx.update(ref, {players});
+  });
+  log('準備状態を切替');
+}
+
+/* Kick player (owner only) */
+async function kickPlayer(targetId){
+  if(!currentRoom || !actingPlayerId) return;
+  const ref = roomDocRef(currentRoom);
+  await db.runTransaction(async tx=>{
+    const doc = await tx.get(ref); if(!doc.exists) throw new Error('room gone');
+    const room = doc.data();
+    if(room.owner !== actingPlayerId) throw new Error('権限なし');
+    const players = room.players.filter(p=>p.id!==targetId);
+    tx.update(ref, {players});
+  });
+  log('プレイヤーをキックしました');
+}
+
+/* ---------- Game flow (owner-driven, to ensure robust transitions) ---------- */
+
+/* Start game (owner) - distribute deck */
+async function startGameAsOwner(){
+  if(!currentRoom || !actingPlayerId) return;
+  const ref = roomDocRef(currentRoom);
+  await db.runTransaction(async tx=>{
+    const doc = await tx.get(ref); if(!doc.exists) throw new Error('room gone');
+    const room = doc.data();
+    if(room.owner !== actingPlayerId) throw new Error('部屋主のみ開始可能');
+    if(room.players.length < 2) throw new Error('プレイヤー不足'); // adjust as needed
+    // build deck from current cards doc
+    const cardsDoc = await tx.get(cardsDocRef());
+    if(!cardsDoc.exists) throw new Error('cards not initialized');
+    const cardList = cardsDoc.data().list || [];
+    const deck = cardList.map(c=>({id:c.id, name:c.name, img:c.img}));
+    // shuffle
+    for(let i=deck.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [deck[i],deck[j]]=[deck[j],deck[i]]; }
+    // distribute 5 each
+    const order = room.players.map(p=>p.id);
+    // shuffle order
+    for(let i=order.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [order[i],order[j]]=[order[j],order[i]]; }
+    const newPlayers = room.players.map(p => ({...p, hand:[], score:0}));
+    for(const pid of order){
+      const idx = newPlayers.findIndex(x=>x.id===pid);
+      if(idx!==-1){
+        newPlayers[idx].hand = deck.splice(0,5);
       }
     }
-  }catch(err){ console.warn('poll error', err); }
+    tx.update(ref, {
+      deck,
+      discard: [],
+      state: 'playing',
+      turnOrder: order,
+      exchangeRound: 1,
+      exchangeIndex: 0,
+      players: newPlayers,
+      submitted: {},
+      votes: {},
+      voteCounts: {},
+      phase: 'exchange'
+    });
+  });
+  log('ゲーム開始しました');
 }
 
-/* start/stop poll */
-function startPolling(){
-  if(pollTimer) clearInterval(pollTimer);
-  pollTimer = setInterval(()=>{ pollOnce(); }, POLL_MS);
+/* Owner advances exchange turn (manual) */
+async function ownerAdvanceExchange(){
+  if(!currentRoom || !actingPlayerId) return;
+  const ref = roomDocRef(currentRoom);
+  await db.runTransaction(async tx=>{
+    const doc = await tx.get(ref); if(!doc.exists) throw new Error('room gone');
+    const room = doc.data();
+    if(room.owner !== actingPlayerId) throw new Error('権限なし');
+    let idx = (room.exchangeIndex||0) + 1;
+    let rnd = room.exchangeRound||1;
+    if(idx >= (room.turnOrder||[]).length){
+      // next round
+      rnd = (room.exchangeRound||1) + 1;
+      idx = 0;
+    }
+    const updates = { exchangeIndex: idx, exchangeRound: rnd };
+    // if rounds finished (>2) move to submit
+    if(rnd > 2){
+      updates.phase = 'submit';
+    }
+    tx.update(ref, updates);
+  });
+  log('交換ターンを進めました');
 }
-function stopPolling(){ if(pollTimer) clearInterval(pollTimer); pollTimer=null; }
 
-/* -------------------------
-   UI rendering (hand/submit/admin)
-   ------------------------- */
-
-function placeholderForId(id){
-  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='200' height='300'><rect width='100%' height='100%' fill='#eee'/><text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' fill='#666' font-size='18'>${id}</text></svg>`;
-  return 'data:image/svg+xml;base64,' + btoa(svg);
+/* Player performs exchange (must be current exchanger) */
+async function doExchange(selectedIndices){
+  // selectedIndices is array of indices in player's hand
+  if(!currentRoom || !actingPlayerId) { alert('Act as を設定してください'); return; }
+  const ref = roomDocRef(currentRoom);
+  await db.runTransaction(async tx=>{
+    const doc = await tx.get(ref); if(!doc.exists) throw new Error('room gone');
+    const room = doc.data();
+    if(room.phase !== 'exchange') throw new Error('交換フェーズではありません');
+    const currentPid = room.turnOrder[room.exchangeIndex||0];
+    if(currentPid !== actingPlayerId) throw new Error('今はあなたの番ではありません');
+    const players = room.players.map(p => ({...p}));
+    const meIdx = players.findIndex(p=>p.id===actingPlayerId);
+    if(meIdx===-1) throw new Error('player not found');
+    const player = players[meIdx];
+    // remove selected cards from hand (by index, descending)
+    const removed = [];
+    selectedIndices.sort((a,b)=>b-a).forEach(i => {
+      if(i>=0 && i<player.hand.length) removed.push(player.hand.splice(i,1)[0]);
+    });
+    // push removed to deck bottom
+    const deck = (room.deck || []).slice();
+    deck.push(...removed);
+    // draw same number
+    const draw = deck.splice(0, removed.length);
+    player.hand.push(...draw);
+    // write back
+    players[meIdx] = player;
+    tx.update(ref, { players, deck, exchangeIndex: (room.exchangeIndex||0) + 1 });
+  });
+  log('交換を実行しました');
 }
 
-/* render admin cards */
+/* Player no-exchange */
+async function exchangeOK(){
+  if(!currentRoom || !actingPlayerId) return;
+  const ref = roomDocRef(currentRoom);
+  await ref.update({ exchangeIndex: firebase.firestore.FieldValue.increment(1) });
+  log('交換なしでOKしました');
+}
+
+/* Owner manually start submit phase */
+async function ownerStartSubmit(){
+  if(!currentRoom || !actingPlayerId) return;
+  const ref = roomDocRef(currentRoom);
+  await ref.update({ phase: 'submit' });
+  log('提出フェーズに移行しました');
+}
+
+/* Player submit */
+async function submitWork(){
+  if(!currentRoom || !actingPlayerId) return;
+  const role = (el('roleInput').value||'').trim();
+  // collect player's current hand order as ids
+  const roomSnap = await roomDocRef(currentRoom).get();
+  if(!roomSnap.exists) return;
+  const room = roomSnap.data();
+  const players = (room.players||[]).map(p=>({...p}));
+  const me = players.find(p=>p.id===actingPlayerId);
+  if(!me) return;
+  const order = me.hand.map(c=>c.id);
+  // update submitted map
+  const submitted = room.submitted || {};
+  submitted[actingPlayerId] = { order, roleName: role, submitted: true };
+  await roomDocRef(currentRoom).update({ submitted });
+  log('提出しました: ' + (role||'(無題)'));
+}
+
+/* Owner start vote phase */
+async function ownerStartVote(){
+  if(!currentRoom || !actingPlayerId) return;
+  await roomDocRef(currentRoom).update({ phase: 'vote', votes: {}, voteCounts: {} });
+  log('投票フェーズに移行しました');
+}
+
+/* Cast vote */
+async function castVote(targetId){
+  if(!currentRoom || !actingPlayerId) return;
+  const ref = roomDocRef(currentRoom);
+  await db.runTransaction(async tx=>{
+    const doc = await tx.get(ref); if(!doc.exists) throw new Error('room gone');
+    const room = doc.data();
+    const votes = room.votes || {};
+    const voteCounts = room.voteCounts || {};
+    if(votes[actingPlayerId]) throw new Error('既に投票済みです');
+    votes[actingPlayerId] = targetId;
+    voteCounts[targetId] = (voteCounts[targetId]||0) + 1;
+    tx.update(ref, { votes, voteCounts });
+  });
+  log('投票しました');
+}
+
+/* Owner finish vote and compute result */
+async function ownerFinishVote(){
+  if(!currentRoom || !actingPlayerId) return;
+  const ref = roomDocRef(currentRoom);
+  await db.runTransaction(async tx=>{
+    const doc = await tx.get(ref); if(!doc.exists) throw new Error('room gone');
+    const room = doc.data();
+    const counts = room.voteCounts || {};
+    // ensure all present have count entries
+    const turnOrder = room.turnOrder || [];
+    let max = -1;
+    turnOrder.forEach(pid => { counts[pid] = counts[pid] || 0; if(counts[pid] > max) max = counts[pid]; });
+    const winners = turnOrder.filter(pid => counts[pid] === max);
+    tx.update(ref, { phase: 'result', result: { winners, counts } });
+  });
+  log('投票結果を確定しました');
+}
+
+/* Next game reset (owner) */
+async function resetAfterGame(){
+  if(!currentRoom || !actingPlayerId) return;
+  const ref = roomDocRef(currentRoom);
+  await ref.update({
+    players: firebase.firestore.FieldValue.delete() // we'll rebuild via client leaving/joining for simplicity
+  });
+  // simpler: just set phase to waiting and clear game fields (actual removal kept minimal)
+  await roomDocRef(currentRoom).update({
+    state: 'waiting', deck: [], discard: [], turnOrder: [], exchangeRound:1, exchangeIndex:0,
+    submitted: {}, votes: {}, voteCounts: {}, phase: 'waiting'
+  });
+  log('ゲームをリセットしました');
+}
+
+/* ---------- Cards admin (Firestore) ---------- */
 function renderAdminCards(){
   const wrap = el('adminCards'); if(!wrap) return; wrap.innerHTML = '';
-  const search = (el('adminSearch')||{value:''}).value.toLowerCase();
+  const q = (el('adminSearch')||{value:''}).value.toLowerCase();
   for(const c of cards){
-    if(search && !(c.id.includes(search) || c.name.toLowerCase().includes(search))) continue;
+    if(q && !(c.id.includes(q) || c.name.toLowerCase().includes(q))) continue;
     const box = document.createElement('div'); box.className='card';
     const img = document.createElement('img'); img.src = c.img || placeholderForId(c.id); img.style.height='90px';
     const name = document.createElement('input'); name.value = c.name; name.onchange = async ()=> {
       c.name = name.value;
-      try { await saveCardsToRepo('Update card name ' + c.id); el('connectMsg').innerText = 'カード名を保存しました'; } catch(e){ alert('保存失敗: '+e.message); }
+      await saveCardsToServer();
     };
-    const file = document.createElement('input'); file.type='file'; file.accept='image/*';
-    file.onchange = (ev)=> {
+    const file = document.createElement('input'); file.type='file'; file.accept='image/*'; file.onchange = (ev)=> {
       const f = ev.target.files[0];
       const r = new FileReader();
-      r.onload = async (e)=> { c.img = e.target.result; try { await saveCardsToRepo('Update card img ' + c.id); renderAdminCards(); el('connectMsg').innerText = 'カード画像を保存しました'; } catch(e){ alert('保存失敗: '+e.message); } };
+      r.onload = async (e)=> { c.img = e.target.result; await saveCardsToServer(); renderAdminCards(); };
       if(f) r.readAsDataURL(f);
     };
     box.appendChild(img); box.appendChild(name); box.appendChild(file);
@@ -418,313 +663,249 @@ function renderAdminCards(){
   }
 }
 
-/* render submit hand */
+function placeholderForId(id){
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='200' height='300'><rect width='100%' height='100%' fill='#eee'/><text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' fill='#666' font-size='18'>${id}</text></svg>`;
+  return 'data:image/svg+xml;base64,' + btoa(svg);
+}
+
+/* Fetch cards once (used on init) */
+async function fetchCardsOnce(){
+  const doc = await cardsDocRef().get();
+  if(!doc.exists){
+    const arr=[];
+    for(let i=1;i<=90;i++){ const id = String(i).padStart(3,'0'); arr.push({id,name:`Card ${id}`,img:null}); }
+    await cardsDocRef().set({list: arr});
+    cards = arr;
+  } else {
+    cards = (doc.data().list || []);
+  }
+  renderAdminCards();
+}
+
+/* Save cards to server (firestore) */
+async function saveCardsToServer(){
+  await cardsDocRef().set({list: cards});
+  log('カードを保存しました');
+}
+
+/* Export / Import */
+el('btnExport').onclick = async ()=> {
+  const doc = await cardsDocRef().get();
+  const data = JSON.stringify(doc.exists ? doc.data().list : cards, null, 2);
+  const blob = new Blob([data], {type:'application/json'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download='cards.json'; a.click();
+};
+el('btnImport').onclick = ()=> el('importFile').click();
+el('importFile').onchange = (e)=> {
+  const f = e.target.files[0]; if(!f) return;
+  const r = new FileReader();
+  r.onload = async ev => {
+    try{
+      const parsed = JSON.parse(ev.target.result);
+      if(Array.isArray(parsed)){
+        cards = parsed;
+        await saveCardsToServer();
+        renderAdminCards();
+        alert('インポート完了');
+      } else alert('不正なファイル');
+    } catch(err){ alert('読み込み失敗'); }
+  };
+  r.readAsText(f);
+};
+
+/* ---------- Render UI helpers (hand/submit/vote) ---------- */
+
 function renderSubmitHand(){
   const container = el('submitHand'); if(!container) return;
   container.innerHTML = '';
-  const room = currentRoomObj(); if(!room) return;
-  const player = room.players.find(p=>p.id===actingPlayerId);
+  if(!currentRoom) return;
+  const room = localRoomsCache[currentRoom] || {};
+  const player = (room.players||[]).find(p=>p.id===actingPlayerId);
   if(!player) return;
-  player.hand.forEach((c)=>{
+  (player.hand||[]).forEach(c => {
     const meta = cards.find(x=>x.id===c.id);
     const div = document.createElement('div'); div.className='card'; div.dataset.id = c.id;
-    const img = document.createElement('img'); img.src = (c.img || (meta && meta.img) || placeholderForId(c.id));
-    const nm = document.createElement('div'); nm.textContent = (c.name || (meta && meta.name) || c.id);
-    div.appendChild(img); div.appendChild(nm);
-    container.appendChild(div);
+    const img = document.createElement('img'); img.src = c.img || (meta && meta.img) || placeholderForId(c.id);
+    const nm = document.createElement('div'); nm.textContent = c.name || (meta && meta.name) || c.id;
+    div.appendChild(img); div.appendChild(nm); container.appendChild(div);
   });
   makeSortable(container);
 }
 
-/* render hand area */
 function renderHandArea(){
-  const room = currentRoomObj(); if(!room) return;
-  const player = room.players.find(p=>p.id===actingPlayerId);
   const wrap = el('handArea'); if(!wrap) return; wrap.innerHTML = '';
+  if(!currentRoom) return;
+  const room = localRoomsCache[currentRoom] || {};
+  const player = (room.players||[]).find(p=>p.id===actingPlayerId);
   if(!player) return;
-  player.hand.forEach((c,idx)=>{
+  (player.hand||[]).forEach((c,idx) => {
     const meta = cards.find(x=>x.id===c.id);
     const div = document.createElement('div'); div.className='card'; div.dataset.index = idx;
-    const img = document.createElement('img'); img.src = (c.img || (meta && meta.img) || placeholderForId(c.id));
-    const nm = document.createElement('div'); nm.textContent = (c.name || (meta && meta.name) || c.id);
-    div.appendChild(img); div.appendChild(nm);
-    div.onclick = ()=> { div.classList.toggle('selected'); };
+    const img = document.createElement('img'); img.src = c.img || (meta && meta.img) || placeholderForId(c.id);
+    const nm = document.createElement('div'); nm.textContent = c.name || (meta && meta.name) || c.id;
+    div.appendChild(img); div.appendChild(nm); div.onclick = ()=> div.classList.toggle('selected');
     wrap.appendChild(div);
   });
   renderSubmitHand();
 }
 
-/* make sortable (drag/drop) */
-function makeSortable(container){
-  let dragEl = null;
-  Array.from(container.children).forEach(ch=>{
-    ch.draggable = true;
-    ch.ondragstart = (e)=>{ dragEl = ch; e.dataTransfer.setData('text/plain',''); ch.style.opacity = .4; };
-    ch.ondragend = ()=>{ if(dragEl) dragEl.style.opacity = 1; dragEl = null; };
-    ch.ondragover = (e)=>{ e.preventDefault(); };
-    ch.ondrop = (e)=>{ e.preventDefault(); if(!dragEl || dragEl===ch) return; container.insertBefore(dragEl, ch.nextSibling); };
-  });
-}
-
-/* render submissions for vote */
 function renderSubmissions(){
-  const room = currentRoomObj(); if(!room) return;
   const container = el('submissionsArea'); if(!container) return; container.innerHTML = '';
-  for(const pid of room.turnOrder){
-    const sub = room.submitted[pid] || {order: room.players.find(p=>p.id===pid).hand.map(c=>c.id), roleName:''};
+  if(!currentRoom) return;
+  const room = localRoomsCache[currentRoom] || {};
+  const turnOrder = room.turnOrder || [];
+  for(const pid of turnOrder){
+    const sub = (room.submitted && room.submitted[pid]) || {order: (room.players||[]).find(p=>p.id===pid).hand.map(c=>c.id), roleName: ''};
     const box = document.createElement('div'); box.className='card';
-    box.innerHTML = `<div style="font-weight:700">${escapeHtml((room.players.find(p=>p.id===pid)||{}).nick)}</div><div class="small">${escapeHtml(sub.roleName)}</div>`;
+    box.innerHTML = `<div style="font-weight:700">${escapeHtml(((room.players||[]).find(p=>p.id===pid)||{}).nick || pid)}</div><div class="small">${escapeHtml(sub.roleName)}</div>`;
     const row = document.createElement('div'); row.style.display='flex'; row.style.gap='6px'; row.style.marginTop='6px';
-    sub.order.forEach(cid=>{
-      const cc = cards.find(x=>x.id===cid) || {id:cid,name:cid,img:null};
-      const thumb = document.createElement('img'); thumb.src = cc.img || placeholderForId(cc.id); thumb.style.width='46px'; thumb.style.height='68px'; thumb.style.objectFit='cover';
+    (sub.order||[]).forEach(cid => {
+      const meta = cards.find(x=>x.id===cid) || {id:cid,name:cid,img:null};
+      const thumb = document.createElement('img'); thumb.src = meta.img || placeholderForId(cid); thumb.style.width='46px'; thumb.style.height='68px'; thumb.style.objectFit='cover';
       row.appendChild(thumb);
     });
     box.appendChild(row);
     if(actingPlayerId && actingPlayerId !== pid && !(room.votes && room.votes[actingPlayerId])){
-      const voteBtn = document.createElement('button'); voteBtn.textContent='投票'; voteBtn.onclick = async ()=>{
-        room.votes = room.votes || {}; room.voteCounts = room.voteCounts || {};
-        room.votes[actingPlayerId] = pid;
-        room.voteCounts[pid] = (room.voteCounts[pid]||0)+1;
-        try { await saveRoomsToRepo('Vote update'); renderSubmissions(); el('connectMsg').innerText = '投票を保存しました'; } catch(e){ alert('保存失敗: '+e.message); }
-      };
+      const voteBtn = document.createElement('button'); voteBtn.textContent='投票'; voteBtn.onclick = ()=> { castVote(pid).catch(e=>alert('投票失敗:'+e.message)); };
       box.appendChild(voteBtn);
     } else {
-      const note = document.createElement('div'); note.className='small'; note.innerText = actingPlayerId===pid ? 'あなたの提出' : ((room.votes && room.votes[actingPlayerId]) ? '投票済' : '');
+      const note = document.createElement('div'); note.className='small';
+      note.innerText = actingPlayerId === pid ? 'あなたの提出' : (room.votes && room.votes[actingPlayerId] ? '投票済' : '');
       box.appendChild(note);
     }
     container.appendChild(box);
   }
 }
 
-/* refreshLobby */
+/* sortable for submit hand */
+function makeSortable(container){
+  let dragEl = null;
+  Array.from(container.children).forEach(ch=>{
+    ch.draggable = true;
+    ch.ondragstart = (e)=>{ dragEl = ch; e.dataTransfer.setData('text/plain', ''); ch.style.opacity = .4; };
+    ch.ondragend = ()=>{ if(dragEl) dragEl.style.opacity = 1; dragEl = null; };
+    ch.ondragover = (e)=> e.preventDefault();
+    ch.ondrop = (e)=>{ e.preventDefault(); if(!dragEl || dragEl===ch) return; container.insertBefore(dragEl, ch.nextSibling); };
+  });
+}
+
+/* ---------- UI refresh functions ---------- */
+
+const localRoomsCache = {}; // keep last snapshot for quick reads
+
+// refresh lobby UI from cached room
 function refreshLobby(){
-  const room = currentRoomObj(); if(!room) return;
+  const room = localRoomsCache[currentRoom];
+  if(!room) return;
   el('roomCodeDisplay').innerText = room.code;
-  el('roomOwner').innerText = (room.owner? (room.players.find(p=>p.id===room.owner)||{}).nick : '');
+  el('roomOwner').innerText = (room.owner ? (room.players.find(p=>p.id===room.owner)||{}).nick : '');
   const wrap = el('playersList'); wrap.innerHTML = '';
-  room.players.forEach(p=>{
+  (room.players||[]).forEach(p=>{
     const div = document.createElement('div'); div.className='card';
-    div.innerHTML = `<div style="font-weight:700">${escapeHtml(p.nick)}</div><div class="small">ready: ${p.ready? '✅': '—'}</div>`;
+    div.innerHTML = `<div style="font-weight:700">${escapeHtml(p.nick)}</div><div class="small">ready: ${p.ready? '✅':'—'}</div>`;
     if(room.owner === actingPlayerId && p.id !== room.owner){
-      const b = document.createElement('button'); b.textContent='Kick'; b.onclick = async ()=> {
-        // update server-side
-        try{
-          const updated = room.players.filter(x=>x.id!==p.id);
-          await ghUpdateRoomPlayers(room.code, updated);
-          el('connectMsg').innerText = 'キックしました';
-        }catch(e){ alert('キック失敗: '+e.message); }
-      };
+      const b = document.createElement('button'); b.textContent='Kick'; b.onclick = ()=> kickPlayer(p.id);
       div.appendChild(b);
     }
     wrap.appendChild(div);
   });
-  const sel = el('actAsSelect'); sel.innerHTML = '';
-  room.players.forEach(p => { const o = document.createElement('option'); o.value = p.id; o.text = p.nick; sel.appendChild(o); });
-  sel.value = actingPlayerId || (room.players[0] && room.players[0].id) || '';
+  const sel = el('actAsSelect'); sel.innerHTML='';
+  (room.players||[]).forEach(p=>{ const o=document.createElement('option'); o.value=p.id; o.text=p.nick; sel.appendChild(o); });
+  sel.value = actingPlayerId || '';
   sel.onchange = ()=> { actingPlayerId = sel.value; renderHandArea(); };
-  const allReady = room.players.length >= 4 && room.players.every(p=>p.ready);
-  el('btnStartGame').classList.toggle('hidden', !(allReady && actingPlayerId===room.owner));
-  el('btnDissolve').classList.toggle('hidden', actingPlayerId===room.owner? false : true);
+  el('btnStartGame').classList.toggle('hidden', !(room.players.length >= 4 && (room.players||[]).every(p=>p.ready) && actingPlayerId===room.owner));
+  el('btnDissolve').classList.toggle('hidden', actingPlayerId===room.owner?false:true);
+  // show/hide game area based on phase
+  el('gameArea').classList.toggle('hidden', room.phase === 'waiting' || !room.phase);
+  // owner controls visible to owner
+  el('ownerControls').classList.toggle('hidden', !(actingPlayerId===room.owner));
 }
 
-/* helper current room */
-function currentRoomObj(){ return currentRoom ? rooms[currentRoom] : null; }
-
-/* -------------------------
-   Helper: update players array in room doc (via rooms.json)
-   ------------------------- */
-async function ghUpdateRoomPlayers(code, players, message){
-  if(!rooms[code]) throw new Error('room not found');
-  rooms[code].players = players;
-  if(rooms[code].owner && !players.find(p=>p.id===rooms[code].owner)){
-    rooms[code].owner = players.length>0 ? players[0].id : null;
-  }
-  await saveRoomsToRepo(message || `Update players of ${code}`);
-}
-
-/* -------------------------
-   Room actions (create/join/leave etc.) stored in rooms object & saved to GitHub
-   ------------------------- */
-
-async function createRoom(){
-  const cfg = ghConfig();
-  if(!cfg.owner || !cfg.repo){ alert('まず GitHub 設定を入力して接続してください'); return; }
-  const code = (el('newCode').value||'').trim();
-  const max = parseInt(el('maxPlayers').value||4);
-  const creator = (el('creatorName').value||'Owner').trim();
-  if(!/^\d{4}$/.test(code)){ alert('合言葉は4桁の数字にしてください'); return; }
-  reloadRoomsFromRepo(); // ensure latest
-  if(rooms[code]){ alert('その合言葉は既に使われています'); return; }
-  const room = {
-    code, owner:null, maxPlayers: Math.min(6, Math.max(4,max)),
-    players:[], state:'waiting', deck:[], discard:[], turnOrder:[], exchangeRound:1, exchangeIndex:0,
-    submitted:{}, votes:{}, voteCounts:{}, phase:'waiting'
-  };
-  rooms[code] = room;
-  try {
-    await saveRoomsToRepo(`Create room ${code}`);
-    // now join as creator
-    await joinRoomWithName(code, creator, true);
-    el('startMsg').innerText = `部屋 ${code} を作成しました。`;
-  } catch(e){ alert('作成失敗: '+e.message); delete rooms[code]; }
-}
-
-async function joinRoom(){
-  const code = (el('joinCode').value||'').trim();
-  const name = (el('joinName').value||('P'+Math.floor(Math.random()*1000))).trim();
-  if(!/^\d{4}$/.test(code)){ el('joinMsg').innerText = '合言葉は4桁'; return; }
-  await reloadRoomsFromRepo();
-  if(!rooms[code]){ el('joinMsg').innerText = 'その合言葉の部屋はありません'; return; }
-  await joinRoomWithName(code, name, false);
-}
-
-async function joinRoomWithName(code, name, isCreator){
-  await reloadRoomsFromRepo();
-  const room = rooms[code];
-  if(!room){ alert('その合言葉の部屋はありません'); return; }
-  if(room.players.length >= room.maxPlayers){ alert('満員です'); return; }
-  const pid = uid('p');
-  const player = {id:pid, nick: name, ready:false, hand:[], score:0, connected:true};
-  room.players.push(player);
-  if(isCreator) room.owner = pid;
-  try {
-    await saveRoomsToRepo(`Join ${name} to ${code}`);
-    currentRoom = code; actingPlayerId = pid;
-    el('myDisplay').value = player.nick;
-    refreshLobby();
-    showView('lobbyView');
-    log(`${player.nick} が部屋 ${code} に参加しました`);
-  } catch(e){
-    alert('参加失敗: '+e.message);
-    // revert local change by reloading
-    await reloadRoomsFromRepo();
+/* refresh game UI */
+function refreshGameUI(){
+  const room = localRoomsCache[currentRoom]; if(!room) return;
+  el('phaseLabel').innerText = room.phase || '—';
+  el('exchangeRoundDisplay').innerText = room.exchangeRound || '-';
+  el('exchangeIndexDisplay').innerText = ((room.exchangeIndex||0)+1) + '/' + ((room.turnOrder||[]).length||0);
+  // toggle panels
+  el('exchangePanel').classList.toggle('hidden', room.phase !== 'exchange');
+  el('submitPanel').classList.toggle('hidden', room.phase !== 'submit');
+  el('votePanel').classList.toggle('hidden', room.phase !== 'vote');
+  el('resultPanel').classList.toggle('hidden', room.phase !== 'result');
+  renderHandArea();
+  renderSubmissions();
+  if(room.phase === 'result'){
+    const res = room.result || {};
+    let html = '<div class="small">得票数</div>';
+    const counts = res.counts || room.voteCounts || {};
+    (room.turnOrder||[]).forEach(pid => { html += `<div>${escapeHtml((room.players.find(p=>p.id===pid)||{}).nick||pid)}: ${counts[pid]||0}</div>`; });
+    html += `<div style="margin-top:8px"><strong>勝者: ${((res.winners||[]).map(w=>escapeHtml((room.players.find(p=>p.id===w)||{}).nick||w))).join(', ')}</strong></div>`;
+    el('resultDisplay').innerHTML = html;
   }
 }
 
-async function leaveRoom(){
-  if(!currentRoom || !actingPlayerId) return;
-  const room = rooms[currentRoom];
-  const idx = room.players.findIndex(p=>p.id===actingPlayerId);
-  if(idx!==-1){
-    const name = room.players[idx].nick;
-    room.players.splice(idx,1);
-    if(room.owner === actingPlayerId){
-      if(room.players.length>0) room.owner = room.players[0].id; else delete rooms[room.code];
-    }
-    try { await saveRoomsToRepo(`${name} left ${room.code}`); } catch(e){ alert('退出保存失敗: '+e.message); }
-  }
-  currentRoom = null; actingPlayerId = null;
-  showView('startView');
-}
-
-/* dissolve */
-async function dissolveRoom(){
-  if(!currentRoom || !actingPlayerId) return;
-  const room = rooms[currentRoom];
-  if(room.owner !== actingPlayerId){ alert('権限なし'); return; }
-  if(!confirm('本当に部屋を解散しますか？')) return;
-  delete rooms[room.code];
-  try { await saveRoomsToRepo(`Dissolve room ${room.code}`); } catch(e){ alert('解散保存失敗: '+e.message); }
-  currentRoom = null; actingPlayerId = null;
-  showView('startView');
-}
-
-/* toggleReady */
-async function toggleReadyUI(){
-  if(!currentRoom || !actingPlayerId) return;
-  const room = rooms[currentRoom];
-  const p = room.players.find(x=>x.id===actingPlayerId);
-  if(!p) return;
-  p.ready = !p.ready;
-  try { await saveRoomsToRepo(`${p.nick} ready=${p.ready}`); } catch(e){ alert('保存失敗: '+e.message); }
-}
-
-/* -------------------------
-   Reload helpers
-   ------------------------- */
-async function reloadCardsFromRepo(){
-  try{ await loadCardsFromRepo(); renderAdminCards(); renderSubmitHand(); renderHandArea(); renderSubmissions(); } catch(e){ console.warn('reloadCards failed', e); }
-}
-async function reloadRoomsFromRepo(){
-  try{ await loadRoomsFromRepo(); } catch(e){ console.warn('reloadRooms failed', e); }
-}
-
-/* -------------------------
-   Initialization & UI wiring
-   ------------------------- */
-el('btnConnect').onclick = async ()=>{
-  const token = el('ghToken').value.trim();
-  setTokenInSession(token);
-  const cfg = ghConfig();
-  if(!cfg.owner || !cfg.repo){ el('connectMsg').innerText = 'owner/repo を入力してください'; return; }
-  try {
-    el('connectMsg').innerText = '読み込み中...';
-    await reloadCardsFromRepo();
-    await reloadRoomsFromRepo();
-    el('connectMsg').innerText = '読み込み完了';
-    startPolling();
-  } catch(e){
-    el('connectMsg').innerText = '読み込み失敗: ' + e.message;
-  }
-};
-el('btnClearToken').onclick = ()=> { setTokenInSession(''); el('connectMsg').innerText = 'トークンを削除しました'; };
-
-el('btnCreate').onclick = ()=> createRoom();
-el('btnJoinExisting').onclick = ()=> { showView('joinView'); };
-el('btnBackStart').onclick = ()=> showView('startView');
-el('btnJoin').onclick = ()=> joinRoom();
-el('btnReady').onclick = ()=> toggleReadyUI();
-el('btnLeave').onclick = ()=> leaveRoom();
-el('btnDissolve').onclick = ()=> dissolveRoom();
+/* ---------- Listeners wiring (buttons) ---------- */
+el('btnCreate').onclick = createRoom;
+el('btnJoinExisting').onclick = ()=> showView('joinView');
+el('btnBackStart').onclick = ()=> { showView('startView'); };
+el('btnJoin').onclick = joinRoom;
+el('btnBackToStart').onclick = ()=> { currentRoom = null; actingPlayerId = null; showView('startView'); };
+el('btnReady').onclick = toggleReady;
+el('btnLeave').onclick = leaveRoom;
+el('btnDissolve').onclick = dissolveRoom;
 el('btnOpenAdmin').onclick = ()=> { showView('adminPanel'); renderAdminCards(); };
-el('btnExport').onclick = ()=> {
-  const data = JSON.stringify(cards, null, 2);
-  const blob = new Blob([data], {type:'application/json'});
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'cards.json'; a.click();
+el('btnAdminLogin').onclick = async ()=> { // simple admin check via prompt
+  const pass = prompt('管理者パスワードを入力してください (ローカルテスト用)'); if(pass === 'nanamiya333'){ showView('adminPanel'); renderAdminCards(); } else alert('パスワードが違います'); };
+el('btnExchangeDo').onclick = async ()=> {
+  // gather selected indices
+  const nodes = Array.from(el('handArea').children).filter(n=>n.classList.contains('selected'));
+  if(nodes.length===0){ alert('交換するカードを選択してください'); return; }
+  const indices = nodes.map(n=>parseInt(n.dataset.index));
+  try{ await doExchange(indices); } catch(e){ alert('交換失敗: '+e.message); }
 };
-el('btnImport').onclick = ()=> el('importFile').click();
-el('importFile').onchange = async (e)=> {
-  const f=e.target.files[0]; if(!f) return;
-  const r=new FileReader(); r.onload = async ev => {
-    try{
-      const parsed = JSON.parse(ev.target.result);
-      if(Array.isArray(parsed)){ cards = parsed; await saveCardsToRepo('Import cards'); renderAdminCards(); alert('インポート完了'); }
-      else alert('不正なファイル');
-    }catch(err){ alert('読み込み失敗'); }
-  }; r.readAsText(f);
-};
+el('btnExchangeOK').onclick = exchangeOK;
+el('btnSubmit').onclick = submitWork;
+el('btnOwnerAdvanceExchange').onclick = ownerAdvanceExchange;
+el('btnOwnerStartSubmit').onclick = ownerStartSubmit;
+el('btnOwnerStartVote').onclick = ownerStartVote;
+el('btnOwnerFinishVote').onclick = ownerFinishVote;
+el('btnNextGame').onclick = resetAfterGame;
 
-/* showView */
-function showView(id){
-  const views = ['startView','joinView','lobbyView','adminPanel'];
-  views.forEach(v=>{ const elv = document.getElementById(v); if(elv) elv.classList.add('hidden'); });
-  const t=document.getElementById(id); if(t) t.classList.remove('hidden');
+/* Attach cards search input */
+el('adminSearch').addEventListener('input', renderAdminCards);
+
+/* ---------- Firestore snapshot caching ---------- */
+/* Keep localRoomsCache updated when room snapshots arrive via attachRoomListener callback */
+roomUnsub = null; // defined earlier
+
+/* Attach room listener wrapper to update local cache and UI */
+function attachRoomListenerWithCache(code){
+  if(roomUnsub) roomUnsub();
+  const ref = roomDocRef(code);
+  roomUnsub = ref.onSnapshot(doc=> {
+    if(!doc.exists){ delete localRoomsCache[code]; if(currentRoom===code){ showView('startView'); currentRoom=null; actingPlayerId=null; } return; }
+    const room = doc.data();
+    localRoomsCache[code] = room;
+    // update UI if this is our current room
+    if(currentRoom === code){
+      refreshLobby(); refreshGameUI();
+    }
+  }, err => log('room snapshot error: '+err.message));
 }
 
-/* initial simple init */
-(function boot(){
-  // try to prefill owner/repo from URL or sessionStorage
-  const storedOwner = sessionStorage.getItem('GH_OWNER'); if(storedOwner) el('ghOwner').value = storedOwner;
-  const storedRepo = sessionStorage.getItem('GH_REPO'); if(storedRepo) el('ghRepo').value = storedRepo;
-  const token = sessionStorage.getItem('GH_TOKEN');
-  if(token) el('ghToken').value = token;
-  showView('startView');
-})();
+/* Overwrite attachRoomListener to use cache version */
+attachRoomListener = attachRoomListenerWithCache;
 
-/* save settings to session when changed */
-['ghOwner','ghRepo','ghBranch','cardsPath','roomsPath'].forEach(id=>{
-  const input=el(id); if(!input) return;
-  input.addEventListener('change', ()=> {
-    sessionStorage.setItem(id.toUpperCase(), input.value);
-  });
-});
+/* ---------- Init after auth changes ---------- */
+/* When signed in we fetch cards and start listening; handled in afterAuthInit() */
 
-/* expose some functions for debugging */
-window._app = {
-  loadCardsFromRepo, loadRoomsFromRepo, saveCardsToRepo, saveRoomsToRepo, pollOnce, ghConfig
+/* Provide cardsDocRef function used above */
+function cardsDocRef(){ return db.doc('meta/cards'); }
+
+/* ---------- Export of helper for debugging ---------- */
+window._debug = {
+  db, fetchCardsOnce, attachCardsListener, attachRoomListenerWithCache
 };
-
 </script>
 </body>
 </html>
